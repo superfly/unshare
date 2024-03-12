@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 
 use libc::pid_t;
-use nix::sys::wait::{waitpid};
+use nix::errno::Errno::{ECHILD, EINTR};
+use nix::sys::wait::waitpid;
 use nix::sys::wait::WaitPidFlag;
-use nix::errno::Errno::{EINTR, ECHILD};
 use nix::Error;
 
 use crate::{ExitStatus, Signal};
@@ -12,7 +12,6 @@ use crate::{ExitStatus, Signal};
 ///
 /// Use `reap_zombies()` to create one, and read docs there
 pub struct ZombieIterator(PhantomData<u8>);
-
 
 impl Iterator for ZombieIterator {
     type Item = (pid_t, ExitStatus);
@@ -32,8 +31,8 @@ impl Iterator for ZombieIterator {
                 Ok(Stopped(_, _)) => continue,
                 Ok(Continued(_)) => continue,
                 Ok(StillAlive) => return None,
-                Err(Error::Sys(EINTR)) => continue,
-                Err(Error::Sys(ECHILD)) => return None,
+                Err(EINTR) => continue,
+                Err(ECHILD) => return None,
                 Err(e) => {
                     panic!("Unexpected waitpid error: {:?}", e);
                 }
@@ -41,7 +40,6 @@ impl Iterator for ZombieIterator {
         }
     }
 }
-
 
 /// Creates iterator over zombie processes
 ///
@@ -70,8 +68,9 @@ impl Iterator for ZombieIterator {
 ///   any more.
 /// * If you got `SIGCHLD` you *must* exhaust this iterator until waiting for
 ///   next signal, or you will have zombie processes around
-pub fn reap_zombies() -> ZombieIterator { ZombieIterator(PhantomData) }
-
+pub fn reap_zombies() -> ZombieIterator {
+    ZombieIterator(PhantomData)
+}
 
 /// The event returned from `child_events()` iterator
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,12 +83,10 @@ pub enum ChildEvent {
     Continue(pid_t),
 }
 
-
 /// A non-blocking iteration over zombies and child stops
 ///
 /// Use `child_events()` to create one, and read docs there
 pub struct ChildEventsIterator(PhantomData<u8>);
-
 
 impl Iterator for ChildEventsIterator {
     type Item = ChildEvent;
@@ -97,25 +94,22 @@ impl Iterator for ChildEventsIterator {
     fn next(&mut self) -> Option<ChildEvent> {
         use self::ChildEvent::*;
         use nix::sys::wait::WaitStatus::*;
-        let flags = WaitPidFlag::WNOHANG | WaitPidFlag::WUNTRACED |
-            WaitPidFlag::WCONTINUED;
+        let flags = WaitPidFlag::WNOHANG | WaitPidFlag::WUNTRACED | WaitPidFlag::WCONTINUED;
         loop {
             match waitpid(None, Some(flags)) {
                 Ok(PtraceEvent(..)) => {}
                 Ok(PtraceSyscall(..)) => {}
                 Ok(Exited(pid, status)) => {
-                    return Some(Death(pid.into(),
-                                      ExitStatus::Exited(status as i8)));
+                    return Some(Death(pid.into(), ExitStatus::Exited(status as i8)));
                 }
                 Ok(Signaled(pid, sig, core)) => {
-                    return Some(Death(pid.into(),
-                                      ExitStatus::Signaled(sig, core)));
+                    return Some(Death(pid.into(), ExitStatus::Signaled(sig, core)));
                 }
                 Ok(Stopped(pid, sig)) => return Some(Stop(pid.into(), sig)),
                 Ok(Continued(pid)) => return Some(Continue(pid.into())),
                 Ok(StillAlive) => return None,
-                Err(Error::Sys(EINTR)) => continue,
-                Err(Error::Sys(ECHILD)) => return None,
+                Err(EINTR) => continue,
+                Err(ECHILD) => return None,
                 Err(e) => {
                     panic!("Unexpected waitpid error: {:?}", e);
                 }
@@ -123,7 +117,6 @@ impl Iterator for ChildEventsIterator {
         }
     }
 }
-
 
 /// Creates iterator over child events
 ///
