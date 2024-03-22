@@ -29,8 +29,6 @@
 #![warn(missing_docs)]
 extern crate libc;
 extern crate nix;
-#[cfg(test)]
-extern crate rand;
 
 mod callbacks;
 mod caps;

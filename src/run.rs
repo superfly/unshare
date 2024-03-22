@@ -17,6 +17,7 @@ use nix::sys::signal::{kill, SIGCHLD, SIGKILL};
 use nix::sys::stat::Mode;
 use nix::sys::wait::waitpid;
 use nix::unistd::{setpgid, Pid};
+use tracing::trace;
 
 use crate::child;
 use crate::chroot::{Chroot, Pivot};
@@ -100,21 +101,21 @@ fn prepare_descriptors(
     let mut guards = Vec::new();
     for (&dest_fd, fdkind) in fds.iter() {
         let mut fd = match fdkind {
-            &Fd::ReadPipe => {
+            Fd::ReadPipe => {
                 let (rd, wr) = Pipe::new()?.split();
                 let fd = rd.into_fd();
                 guards.push(Closing::new(fd));
                 outer.insert(dest_fd, PipeHolder::Writer(wr));
                 fd
             }
-            &Fd::WritePipe => {
+            Fd::WritePipe => {
                 let (rd, wr) = Pipe::new()?.split();
                 let fd = wr.into_fd();
                 guards.push(Closing::new(fd));
                 outer.insert(dest_fd, PipeHolder::Reader(rd));
                 fd
             }
-            &Fd::ReadNull => {
+            Fd::ReadNull => {
                 // Need to keep fd with cloexec, until we are in child
                 let fd = result(
                     Err::CreatePipe,
@@ -127,7 +128,7 @@ fn prepare_descriptors(
                 guards.push(Closing::new(fd));
                 fd
             }
-            &Fd::WriteNull => {
+            Fd::WriteNull => {
                 // Need to keep fd with cloexec, until we are in child
                 let fd = result(
                     Err::CreatePipe,
@@ -140,8 +141,8 @@ fn prepare_descriptors(
                 guards.push(Closing::new(fd));
                 fd
             }
-            &Fd::Inherit => dest_fd,
-            &Fd::Fd(ref x) => x.as_raw_fd(),
+            Fd::Inherit => dest_fd,
+            Fd::Fd(ref x) => x.as_raw_fd(),
         };
         // The descriptor must not clobber the descriptors that are passed to
         // a child
@@ -360,6 +361,15 @@ impl Command {
                     File::create(format!("/proc/{}/uid_map", pid))
                         .and_then(|mut f| f.write_all(&buf[..])),
                 )?;
+
+                let buf = "deny".as_bytes();
+
+                result(
+                    Err::SetGroupsDeny,
+                    File::create(format!("/proc/{}/setgroups", pid))
+                        .and_then(|mut f| f.write_all(&buf[..])),
+                )?;
+
                 let mut buf = Vec::new();
                 for map in gids {
                     writeln!(
